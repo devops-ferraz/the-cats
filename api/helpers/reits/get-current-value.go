@@ -1,4 +1,4 @@
-package reits
+package reitsHelpers
 
 import (
 	"encoding/json"
