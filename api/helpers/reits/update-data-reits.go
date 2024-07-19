@@ -13,6 +13,23 @@ type UpdateResponse struct {
 	Failed  []string `json:"failed"`
 }
 
+var knownStockTickers = map[string]bool{
+	"BBAS3":  true,
+	"BBSE3":  true,
+	"ITUB4":  true,
+	"AURE3":  true,
+	"ITSA4":  true,
+	"TAEE4":  true,
+	"CXSE3":  true,
+	"SAPR4":  true,
+	"BITH11": true,
+	"NASD11": true,
+	"IVVB11": true,
+	"TECK11": true,
+	"NUBANK": true,
+	"SOFISA": true,
+}
+
 func UpdateDataReits(filePath string, sheetName string) UpdateResponse {
 	var response UpdateResponse
 
@@ -22,6 +39,9 @@ func UpdateDataReits(filePath string, sheetName string) UpdateResponse {
 	}
 
 	for _, ticker := range tickers {
+		if ticker == "NUBANK" {
+			break
+		}
 		quote, err := GetCurrentValue(ticker)
 		if err != nil {
 			log.Printf("Erro ao obter o valor atual para %s: %v", ticker, err)
@@ -29,17 +49,21 @@ func UpdateDataReits(filePath string, sheetName string) UpdateResponse {
 			continue
 		}
 
-		dividend, err := GetLastDividend(ticker)
-		if err != nil {
-			log.Printf("Erro ao obter o último dividendo para %s: %v", ticker, err)
-			response.Failed = append(response.Failed, ticker)
-			continue
+		var dividend float64
+		// Verifica se o ticker é uma ação conhecida, se não for, obtém o dividendo
+		if !knownStockTickers[ticker] {
+			dividend, err = GetLastDividend(ticker)
+			if err != nil {
+				log.Printf("Erro ao obter o último dividendo para %s: %v", ticker, err)
+				response.Failed = append(response.Failed, ticker)
+				continue
+			}
 		}
 
 		tickersToUpdate := map[string][2]float64{
 			ticker: {quote, dividend},
 		}
-		err = updateProventosAndCotacoes(filePath, tickersToUpdate, sheetName)
+		err = updateProventosAndCotacoes(filePath, tickersToUpdate, sheetName, knownStockTickers[ticker])
 		if err != nil {
 			log.Printf("Erro ao atualizar proventos e cotações para %s: %v", ticker, err)
 			response.Failed = append(response.Failed, ticker)
@@ -53,14 +77,12 @@ func UpdateDataReits(filePath string, sheetName string) UpdateResponse {
 	return response
 }
 
-func updateProventosAndCotacoes(filePath string, tickers map[string][2]float64, sheetName string) error {
+func updateProventosAndCotacoes(filePath string, tickers map[string][2]float64, sheetName string, isStockSection bool) error {
 	f, err := excelize.OpenFile(filePath)
 	if err != nil {
 		return fmt.Errorf("falha ao abrir o arquivo Excel: %w", err)
 	}
 	defer f.Close()
-
-	// sheetName := "Planilha8"
 
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
@@ -68,20 +90,22 @@ func updateProventosAndCotacoes(filePath string, tickers map[string][2]float64, 
 	}
 
 	for ticker, values := range tickers {
-		provento := values[0]
-		cotacao := values[1]
+		quote := values[0]
+		dividend := values[1]
 		tickerFound := false
 		for i, row := range rows {
 			if len(row) >= 4 && row[3] == ticker {
-				cellProvento := fmt.Sprintf("F%d", i+1)
-				cellCotacao := fmt.Sprintf("E%d", i+1)
-				err = f.SetCellValue(sheetName, cellProvento, provento)
-				if err != nil {
-					return fmt.Errorf("falha ao definir o novo valor de provento: %w", err)
-				}
-				err = f.SetCellValue(sheetName, cellCotacao, cotacao)
+				cellQuote := fmt.Sprintf("E%d", i+1)
+				err = f.SetCellValue(sheetName, cellQuote, quote)
 				if err != nil {
 					return fmt.Errorf("falha ao definir o novo valor de cotação: %w", err)
+				}
+				if !isStockSection {
+					cellDividend := fmt.Sprintf("F%d", i+1)
+					err = f.SetCellValue(sheetName, cellDividend, dividend)
+					if err != nil {
+						return fmt.Errorf("falha ao definir o novo valor de provento: %w", err)
+					}
 				}
 				tickerFound = true
 				break
